@@ -1,16 +1,36 @@
+//Arduino based remote control GoKart
+//Allows for control using a standard RC TX/RX
+//Arduino interprets the output of the receiver and controls
+//larger motors using an external h-bridge
+//Steering is accomplished using an external potentiometer 
+//attached to the steering motor to feedback the current
+//wheel direction
+
 #include <RCArduinoFastLib.h>
 #include <PinChangeInt.h>
 
+//External Switches
+#define ESTOP_IN_PIN 2
+#define MANUAL_OVERRIDE_PIN 3
+
+//Input from RC Receiver
 #define THROTTLE_IN_PIN 5
 #define STEERING_IN_PIN 6
 #define AUX_IN_PIN 7
 
-// Assign your channel out pins
+//Outputs to H-Bridges
 #define THROTTLE_DIR_PIN 8
 #define THROTTLE_PWM_PIN 9
 #define STEERING_DIR_PIN 10
 #define STEERING_PWM_PIN 11
-#define STEERING_FEEDBACK_PIN 10
+
+//Feedback for steering "Servo"
+#define STEERING_FEEDBACK_PIN A0
+
+
+//External Inputs used when manual override enabled
+#define STEERING_WHEEL_PIN A1
+#define GAS_PEDAL_PIN A2
 
 //deadband for steering, currently set to:
 // 10*(5V/1024) = ~48mV
@@ -56,7 +76,14 @@ void setup()
   pinMode(STEERING_PWM_PIN, OUTPUT);
   analogWrite(STEERING_PWM_PIN, 0);
 
-  pinMode(STEERING_FEEDBACK_PIN, INPUT);
+  //Emergeny Stop input
+  //Pulled up internally; must be kept low by safety circuit
+  pinMode(ESTOP_IN_PIN, INPUT);
+  digitalWrite(ESTOP_IN_PIN, HIGH);
+
+  //Manual override pin active low
+  pinMode(MANUAL_OVERRIDE_PIN, INPUT);
+  digitalWrite(MANUAL_OVERRIDE_PIN, HIGH);
 }
 
 void loop()
@@ -94,53 +121,76 @@ void loop()
     interrupts(); // we have local copies of the inputs, so now we can turn interrupts back on
   }
 
-  if(bUpdateFlags & THROTTLE_FLAG)
+  if (digitalRead(ESTOP_IN_PIN) != LOW)
   {
-    throttle = map(unThrottleIn, 1500,2500,-255,255);
-    if (throttle >= 0)
+    if(bUpdateFlags & THROTTLE_FLAG)
     {
-      digitalWrite(THROTTLE_DIR_PIN, HIGH);
+      if (digitalRead(MANUAL_OVERRIDE_PIN) == LOW)
+      {
+        throttle = map(analogRead(GAS_PEDAL_PIN), 0,1023,-255,255);
+      }
+      else
+      {
+        throttle = map(unThrottleIn, 1500,2500,-255,255);
+      }
+      if (throttle >= 0)
+      {
+        digitalWrite(THROTTLE_DIR_PIN, HIGH);
+      }
+      else
+      {
+        digitalWrite(THROTTLE_DIR_PIN, LOW);
+      }
+      analogWrite(THROTTLE_PWM_PIN, abs(throttle));
+    }
+
+    if(bUpdateFlags & STEERING_FLAG)
+    {
+      //Map the steering value to a 0-1023 value for easy comparing to the value read with analogRead
+      steering_set = map(unSteeringIn, 1500,2500,0,1023);
+    }
+
+    steering_feedback = analogRead(STEERING_FEEDBACK_PIN);
+
+    if (digitalRead(MANUAL_OVERRIDE_PIN) == LOW)
+    {
+      steering_set = analogRead(STEERING_WHEEL_PIN);
+    }
+    if ((steering_set - steering_feedback) > STEERING_DEADBAND)
+    {
+      if (steering_set > steering_feedback)
+      {
+        digitalWrite(STEERING_DIR_PIN, HIGH);
+      }
+      else
+      {
+        digitalWrite(STEERING_DIR_PIN, LOW);
+      }
+
+      //To Do: Set the steering speed based on how far we are from the set point
+      //move the steering motor
+      analogWrite(STEERING_PWM_PIN, 255);
     }
     else
     {
-      digitalWrite(THROTTLE_DIR_PIN, LOW);
+      //stop the steering motor
+      analogWrite(STEERING_PWM_PIN, 0);
     }
-    analogWrite(THROTTLE_PWM_PIN, abs(throttle));
-  }
 
-  if(bUpdateFlags & STEERING_FLAG)
-  {
-    //Map the steering value to a 0-1023 value for easy comparing to the value read with analogRead
-    steering_set = map(unSteeringIn, 1500,2500,0,1023);
-  }
-
-  steering_feedback = analogRead(STEERING_FEEDBACK_PIN);
-
-  if ((steering_set - steering_feedback) > STEERING_DEADBAND)
-  {
-    if (steering_set > steering_feedback)
+    if(bUpdateFlags & AUX_FLAG)
     {
-      digitalWrite(STEERING_DIR_PIN, HIGH);
     }
-    else
-    {
-      digitalWrite(STEERING_DIR_PIN, LOW);
-    }
-
-    //move the steering motor
-    analogWrite(STEERING_PWM_PIN, 255);
   }
   else
   {
-    //stop the steering motor
     analogWrite(STEERING_PWM_PIN, 0);
+    analogWrite(THROTTLE_PWM_PIN, 0);
   }
 
-  if(bUpdateFlags & AUX_FLAG)
-  {
-  }
-
-
+  Serial.print("e-stop in:"); 
+  Serial.println(digitalRead(ESTOP_IN_PIN));
+  Serial.print("manual override:"); 
+  Serial.println(digitalRead(MANUAL_OVERRIDE_PIN));
   Serial.print("throttle in (uSec):");
   Serial.println(unThrottleIn);
   Serial.print("throttle val (-255-255):");
@@ -200,4 +250,3 @@ void calcAux()
     unAuxInShared = (TCNT1 - unAuxInStart)>>1;
     bUpdateFlagsShared |= AUX_FLAG;  }
 }
-
