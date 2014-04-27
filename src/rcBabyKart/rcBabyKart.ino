@@ -34,16 +34,16 @@ struct rcCalibration {
 } calibration = { 
     CONFIG_VERSION,
     0,
-    1500,
-    1500,
-    1500,
-    1500,
-    1500,
-    1500,
-    1500,
-    1500,
-    512,
-    512
+    3000,
+    0,
+    3000,
+    0,
+    3000,
+    0,
+    3000,
+    0,
+    1023,
+    0
 };
 
 bool loadConfig() {
@@ -61,11 +61,11 @@ void saveConfig() {
 #define CALIBRATION_TIME      20000
 
 //OUTPUTS (To H-Bridge)
-#define STEERING_DIR_PIN       10
-#define STEERING_PWM_PIN       11
-#define THROTTLE_DIR_PIN       12
-#define THROTTLE_PWM_PIN       13
-#define LIGHTING_PIN            3
+#define STEERING_DIR_PIN       2
+#define STEERING_PWM_PIN       3
+#define THROTTLE_DIR_PIN       4
+#define THROTTLE_PWM_PIN       5
+#define LIGHTING_PIN           10
 
 //INPUTS:
 //Input from RC Receiver
@@ -75,10 +75,10 @@ void saveConfig() {
 #define SAFETY_RC_IN_PIN       9
 
 //Switches
-#define TURBO_IN_PIN           1
-#define LOCAL_CONTROL_PIN      2
-#define LIGHTING_IN_PIN        3
-#define ESTOP_IN_PIN           4
+#define TURBO_IN_PIN           11
+#define LOCAL_CONTROL_PIN      12
+#define LIGHTING_IN_PIN        12
+#define ESTOP_IN_PIN           13
 
 //Feedback for steering Servo (steering column position)
 #define STEERING_FEEDBACK_PIN A1
@@ -113,15 +113,15 @@ void saveConfig() {
 //If manual override pin is pulled low it is active
 #define LOCAL_CONTROL (digitalRead(LOCAL_CONTROL_PIN) == LOW)
 
-volatile uint8_t bUpdateFlagsShared;
-volatile uint16_t throttleInPulseLengthShared;
-volatile uint16_t steeringInPulseLengthShared;
-volatile uint16_t lightsInPulseLengthShared;
-volatile uint16_t safetyInPulseLengthShared;
-uint16_t throttleInPulseLengthStart;
-uint16_t steeringInPulseLengthStart;
-uint16_t lightsInPulseLengthStart;
-uint16_t safetyInPulseLengthStart;
+volatile uint8_t bUpdateFlagsShared = 0;
+volatile uint16_t throttleInPulseLengthShared = 0;
+volatile uint16_t steeringInPulseLengthShared= 0;
+volatile uint16_t lightsInPulseLengthShared = 0;
+volatile uint16_t safetyInPulseLengthShared = 0;
+uint16_t throttleInPulseLengthStart = 0;
+uint16_t steeringInPulseLengthStart = 0;
+uint16_t lightsInPulseLengthStart = 0;
+uint16_t safetyInPulseLengthStart = 0;
 
 uint8_t turbo_active = 0;
 uint32_t do_calibration = 0;
@@ -139,10 +139,9 @@ void setup()
 
   EEPROM.setMemPool(memoryBase, EEPROMSizeUno); //Set memorypool base to 32, assume Arduino Uno board
   configAdress  = EEPROM.getAddress(sizeof(rcCalibration)); // Size of config object 
-  config_ok = loadConfig();
-
+  
   // lets set a standard rate of 50 Hz by setting a frame space of 10 * 2000 = 1 Servos + 9 times 2000
-  CRCArduinoFastServos::setFrameSpaceA(SERVO_FRAME_SPACE,9*2000);
+  CRCArduinoFastServos::setFrameSpaceA(SERVO_FRAME_SPACE,6*2000);
   CRCArduinoFastServos::begin();
   PCintPort::attachInterrupt(THROTTLE_RC_IN_PIN, calcThrottle,CHANGE);
   PCintPort::attachInterrupt(STEERING_RC_IN_PIN, calcSteering,CHANGE);
@@ -178,9 +177,43 @@ void setup()
   do_calibration = 0;
   if (TURBO_PUSHED)
   {
+    saveConfig();
     do_calibration = CALIBRATION_TIME;
   }
+  loadConfig();
 
+
+}
+
+void printCalibration()
+{
+  //Log calibration Info every 500ms
+  Serial.println(""); 
+  Serial.print("Throttle Min: "); 
+  Serial.print(calibration.throttle_min, DEC); 
+  Serial.print("\tMax:"); 
+  Serial.print(calibration.throttle_max, DEC); 
+  Serial.println(""); 
+  Serial.print("Steering Min: "); 
+  Serial.print(calibration.steering_min, DEC); 
+  Serial.print("\tMax:"); 
+  Serial.print(calibration.steering_max, DEC); 
+  Serial.println(""); 
+  Serial.print("Lights Min: "); 
+  Serial.print(calibration.lights_min, DEC); 
+  Serial.print("\tMax:"); 
+  Serial.print(calibration.lights_max, DEC); 
+  Serial.println(""); 
+  Serial.print("Safety Min: "); 
+  Serial.print(calibration.safety_min, DEC); 
+  Serial.print("\tMax:"); 
+  Serial.print(calibration.safety_max, DEC); 
+  Serial.println(""); 
+  Serial.print("Steering Feedback Min: "); 
+  Serial.print(calibration.steering_feedback_min, DEC); 
+  Serial.print("\tMax:"); 
+  Serial.print(calibration.steering_feedback_max, DEC); 
+  Serial.println(""); 
 }
 
 void loop()
@@ -202,7 +235,7 @@ void loop()
     noInterrupts(); // turn interrupts off quickly while we take local copies of the shared variables
     bUpdateFlags = bUpdateFlagsShared;
 
-    if(bUpdateFlags & THROTTLE_FLAG)
+    if((bUpdateFlags & THROTTLE_FLAG) && (throttleInPulseLengthShared != 65536))
     {
       throttleInPulseLength = throttleInPulseLengthShared;
     }
@@ -282,18 +315,23 @@ void loop()
     }
 
 
-    if (do_calibration % 500)
+    if ((do_calibration % 1000) == 0)
     {
       //Log calibration Info every 500ms
+      Serial.println(""); 
       Serial.print("Throttle Min: "); 
       Serial.print(calibration.throttle_min, DEC); 
       Serial.print("\tMax:"); 
       Serial.print(calibration.throttle_max, DEC); 
+      Serial.print("\tCur:"); 
+      Serial.print(throttleInPulseLength, DEC); 
       Serial.println(""); 
       Serial.print("Steering Min: "); 
       Serial.print(calibration.steering_min, DEC); 
       Serial.print("\tMax:"); 
       Serial.print(calibration.steering_max, DEC); 
+      Serial.print("\tCur:"); 
+      Serial.print(steeringInPulseLength, DEC); 
       Serial.println(""); 
       Serial.print("Lights Min: "); 
       Serial.print(calibration.lights_min, DEC); 
@@ -425,11 +463,13 @@ void loop()
         //TODO
 	digitalWrite(ESTOP_IN_PIN, LOW);
       }
+      calibration.calibrated = 1;
     }
 
     
     if (DEBUG)
     {
+      printCalibration();
       Serial.print("e-stop in:"); 
       Serial.println(digitalRead(ESTOP_IN_PIN), DEC);
       Serial.print("Local control:"); 
