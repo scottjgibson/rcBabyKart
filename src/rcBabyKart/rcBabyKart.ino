@@ -27,14 +27,10 @@ struct rcCalibration {
     uint16_t steering_max;
     uint16_t lights_min;
     uint16_t lights_max;
-    uint16_t safety_min;
-    uint16_t safety_max;
     uint16_t steering_feedback_min;
     uint16_t steering_feedback_max;
 } calibration = { 
     CONFIG_VERSION,
-    0,
-    3000,
     0,
     3000,
     0,
@@ -72,7 +68,7 @@ void saveConfig() {
 #define THROTTLE_RC_IN_PIN     6
 #define STEERING_RC_IN_PIN     7
 #define LIGHTING_RC_IN_PIN     8
-#define SAFETY_RC_IN_PIN       9
+
 
 //Switches
 #define TURBO_IN_PIN           11
@@ -81,7 +77,7 @@ void saveConfig() {
 #define ESTOP_IN_PIN           13
 
 //Feedback for steering Servo (steering column position)
-#define STEERING_FEEDBACK_PIN A1
+#define STEERING_FEEDBACK_PIN A0
 
 //External Inputs used when manual override enabled
 //For Drive-By-Wire Steering
@@ -103,7 +99,7 @@ void saveConfig() {
 #define THROTTLE_FLAG         1
 #define STEERING_FLAG         2
 #define LIGHTING_FLAG         4
-#define SAFETY_FLAG           8
+
 
 //The ESTOP Pin  must be held low by safety circuit
 //if the circuit is opened the signal is pulled up
@@ -117,11 +113,10 @@ volatile uint8_t bUpdateFlagsShared = 0;
 volatile uint16_t throttleInPulseLengthShared = 0;
 volatile uint16_t steeringInPulseLengthShared= 0;
 volatile uint16_t lightsInPulseLengthShared = 0;
-volatile uint16_t safetyInPulseLengthShared = 0;
 uint16_t throttleInPulseLengthStart = 0;
 uint16_t steeringInPulseLengthStart = 0;
 uint16_t lightsInPulseLengthStart = 0;
-uint16_t safetyInPulseLengthStart = 0;
+
 
 uint8_t turbo_active = 0;
 uint32_t do_calibration = 0;
@@ -130,23 +125,23 @@ uint8_t config_ok = 0;
 void calcThrottle();
 void calcSteering();
 void calcLighting();
-void calcSafety();
+
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("RCBabyKart 1.0");
-
+ Serial.println("a");
   EEPROM.setMemPool(memoryBase, EEPROMSizeUno); //Set memorypool base to 32, assume Arduino Uno board
   configAdress  = EEPROM.getAddress(sizeof(rcCalibration)); // Size of config object 
-  
+  Serial.println("b");
   // lets set a standard rate of 50 Hz by setting a frame space of 10 * 2000 = 1 Servos + 9 times 2000
-  CRCArduinoFastServos::setFrameSpaceA(SERVO_FRAME_SPACE,6*2000);
+  CRCArduinoFastServos::setFrameSpaceA(SERVO_FRAME_SPACE,7*2000);
   CRCArduinoFastServos::begin();
   PCintPort::attachInterrupt(THROTTLE_RC_IN_PIN, calcThrottle,CHANGE);
   PCintPort::attachInterrupt(STEERING_RC_IN_PIN, calcSteering,CHANGE);
   PCintPort::attachInterrupt(LIGHTING_RC_IN_PIN, calcLighting,CHANGE);
-  PCintPort::attachInterrupt(SAFETY_RC_IN_PIN, calcSafety,CHANGE);
+
 
   pinMode(THROTTLE_DIR_PIN, OUTPUT);
   pinMode(THROTTLE_PWM_PIN, OUTPUT);
@@ -189,44 +184,46 @@ void printCalibration()
 {
   //Log calibration Info every 500ms
   Serial.println(""); 
-  Serial.print("Throttle Min: "); 
+  Serial.print("CALIBRATION: Calibrated: "); 
+  Serial.print(calibration.calibrated, DEC);
+  Serial.println(""); 
+  Serial.print("CALIBRATION: Throttle Min: "); 
   Serial.print(calibration.throttle_min, DEC); 
   Serial.print("\tMax:"); 
   Serial.print(calibration.throttle_max, DEC); 
   Serial.println(""); 
-  Serial.print("Steering Min: "); 
+  Serial.print("CALIBRATION: Steering Min: "); 
   Serial.print(calibration.steering_min, DEC); 
   Serial.print("\tMax:"); 
   Serial.print(calibration.steering_max, DEC); 
   Serial.println(""); 
-  Serial.print("Lights Min: "); 
+  Serial.print("CALIBRATION: Lights Min: "); 
   Serial.print(calibration.lights_min, DEC); 
   Serial.print("\tMax:"); 
   Serial.print(calibration.lights_max, DEC); 
   Serial.println(""); 
-  Serial.print("Safety Min: "); 
-  Serial.print(calibration.safety_min, DEC); 
-  Serial.print("\tMax:"); 
-  Serial.print(calibration.safety_max, DEC); 
-  Serial.println(""); 
-  Serial.print("Steering Feedback Min: "); 
+  Serial.print("CALIBRATION: Steering Fbk Min: "); 
   Serial.print(calibration.steering_feedback_min, DEC); 
   Serial.print("\tMax:"); 
   Serial.print(calibration.steering_feedback_max, DEC); 
   Serial.println(""); 
 }
 
+int lighting_state = 0;
+int turbo_state = 0;
+
 void loop()
 {
   static int throttle_set;
   static int steering_set;
-  static unsigned int steering_feedback;
+  static int steering_feedback;
   static int steering_delta;
   static uint16_t throttleInPulseLength = 0;
   static uint16_t steeringInPulseLength = 0;
   static uint16_t lightsInPulseLength = 0;
   static uint16_t safetyInPulseLength = 0;
   static uint8_t bUpdateFlags;
+
 
 
 // check shared update flags to see if any channels have a new signal
@@ -292,22 +289,10 @@ void loop()
       }
     }
 
-    if(bUpdateFlags & SAFETY_FLAG)
-    {
-      if (safetyInPulseLength < calibration.safety_min)
-      {
-        calibration.safety_min = safetyInPulseLength;
-      }
-      if (safetyInPulseLength > calibration.safety_max)
-      {
-        calibration.safety_max = safetyInPulseLength;
-      }
-    }
-
     steering_feedback = analogRead(STEERING_FEEDBACK_PIN);
     if (steering_feedback < calibration.steering_feedback_min)
     {
-      calibration.steering_feedback_max = steering_feedback;
+      calibration.steering_feedback_min = steering_feedback;
     }
     if (steering_feedback > calibration.steering_feedback_max)
     {
@@ -319,34 +304,33 @@ void loop()
     {
       //Log calibration Info every 500ms
       Serial.println(""); 
-      Serial.print("Throttle Min: "); 
+      Serial.print("CALIBRATION: Throttle Min: "); 
       Serial.print(calibration.throttle_min, DEC); 
       Serial.print("\tMax:"); 
       Serial.print(calibration.throttle_max, DEC); 
       Serial.print("\tCur:"); 
       Serial.print(throttleInPulseLength, DEC); 
       Serial.println(""); 
-      Serial.print("Steering Min: "); 
+      Serial.print("CALIBRATION: Steering Min: "); 
       Serial.print(calibration.steering_min, DEC); 
       Serial.print("\tMax:"); 
       Serial.print(calibration.steering_max, DEC); 
       Serial.print("\tCur:"); 
       Serial.print(steeringInPulseLength, DEC); 
       Serial.println(""); 
-      Serial.print("Lights Min: "); 
+      Serial.print("CALIBRATION: Lights Min: "); 
       Serial.print(calibration.lights_min, DEC); 
       Serial.print("\tMax:"); 
       Serial.print(calibration.lights_max, DEC); 
+      Serial.print("\tCur:"); 
+      Serial.print(lightsInPulseLength, DEC);
       Serial.println(""); 
-      Serial.print("Safety Min: "); 
-      Serial.print(calibration.safety_min, DEC); 
-      Serial.print("\tMax:"); 
-      Serial.print(calibration.safety_max, DEC); 
-      Serial.println(""); 
-      Serial.print("Steering Feedback Min: "); 
+      Serial.print("CALIBRATION: Steering Feedback Min: "); 
       Serial.print(calibration.steering_feedback_min, DEC); 
       Serial.print("\tMax:"); 
       Serial.print(calibration.steering_feedback_max, DEC); 
+      Serial.print("\tCur:"); 
+      Serial.print(steering_feedback, DEC);
       Serial.println(""); 
     }
  
@@ -357,6 +341,7 @@ void loop()
     }
     else
     {
+      calibration.calibrated = 1;
       saveConfig();
       Serial.println("Config Saved");
     }
@@ -421,10 +406,10 @@ void loop()
       {
         if(DEBUG)
         {
-          Serial.print("steering_set:"); 
-          Serial.println(steering_set);
-          Serial.print("steering_feedback:"); 
-          Serial.println(steering_feedback);
+          //Serial.print("steering_set:"); 
+          //Serial.println(steering_set);
+          //Serial.print("steering_feedback:"); 
+          //Serial.println(steering_feedback);
         }
         if (steering_set > steering_feedback)
         {
@@ -434,8 +419,8 @@ void loop()
         {
           digitalWrite(STEERING_DIR_PIN, LOW);
         }
-        steering_delta = abs(steering_set - steering_feedback);
-        analogWrite(STEERING_PWM_PIN, map(steering_delta, 0, 1023, 50,255));
+        steering_delta = steering_set - steering_feedback;
+        analogWrite(STEERING_PWM_PIN, map(abs(steering_delta), 0, 1023, 50,255));
       }
       else
       {
@@ -446,48 +431,51 @@ void loop()
       //SET LIGHTING
       if (lightsInPulseLength > ((calibration.lights_min + calibration.lights_max)/2))
       {
-        digitalWrite(LIGHTING_PIN, HIGH);
+        lighting_state = 1;
       }
       else
       {
-        digitalWrite(LIGHTING_PIN, LOW);
+        lighting_state = 0;
       }
+      digitalWrite(LIGHTING_PIN, lighting_state);
 
-      if (safetyInPulseLength > ((calibration.safety_min + calibration.safety_max)/2))
-      {
-        //TODO
-	digitalWrite(ESTOP_IN_PIN, LOW);
-      }
-      else
-      {
-        //TODO
-	digitalWrite(ESTOP_IN_PIN, LOW);
-      }
-      calibration.calibrated = 1;
     }
 
     
     if (DEBUG)
     {
       printCalibration();
-      Serial.print("e-stop in:"); 
-      Serial.println(digitalRead(ESTOP_IN_PIN), DEC);
-      Serial.print("Local control:"); 
-      Serial.println(digitalRead(LOCAL_CONTROL_PIN));
-      Serial.print("throttle in (uSec):");
+      Serial.print("OUTPUT: lighting_state:");
+      Serial.print(lighting_state, DEC);
+      Serial.println("");  
+      Serial.print("OUTPUT: throttle_set(-255-255):");
+      Serial.print(throttle_set, DEC);
+      Serial.println("");      
+      
+      Serial.print("INPUT: e-stop in:"); 
+      Serial.print(ESTOP, DEC);
+      Serial.println(""); 
+      Serial.print("INPUT: Local control:"); 
+      Serial.print(LOCAL_CONTROL, DEC);
+      Serial.println("");
+      Serial.print("INPUT: Turbo Button"); 
+      Serial.println(TURBO_PUSHED, DEC);
+      Serial.println("");
+      Serial.print("RC: throttle in (uSec):");
       Serial.println(throttleInPulseLength);
-      Serial.print("throttle_set (-255-255):");
-      Serial.println(throttle_set);
-      Serial.print("steering in (uSec):");
+      Serial.print("RC: steering in (uSec):");
       Serial.println(steeringInPulseLength);
-      Serial.print("steering in (degrees):");
-      Serial.println(map(steeringInPulseLength, 1000, 2000, -90, 90));
-      Serial.print("steering in (0-1023):");
-      Serial.println(steering_set);
-      Serial.print("steering feedback (0-1023):");
-      Serial.println(steering_feedback);
-      Serial.print("aux in: (uSec):");
-      Serial.println(lightsInPulseLength);
+      Serial.print("RC: lights in (uSec):");
+      Serial.println(lightsInPulseLength);     
+      
+      Serial.print("STEERING: steering feedback(0-1023):");
+      Serial.println(steering_feedback, DEC);
+      Serial.print("STEERING: set (0-1023):");
+      Serial.println(steering_set, DEC);
+      Serial.print("STEERING: delta:");
+      Serial.println(steering_delta, DEC);
+      
+
       Serial.print("A0 (0-1023):");
       Serial.println(analogRead(A0));
       Serial.print("A1 (0-1023):");
@@ -546,18 +534,5 @@ void calcLighting()
   {
     lightsInPulseLengthShared = (TCNT1 - lightsInPulseLengthStart)>>1;
     bUpdateFlagsShared |= LIGHTING_FLAG;
-  }
-}
-
-void calcSafety()
-{
-  if(PCintPort::pinState)
-  {
-    safetyInPulseLengthStart = TCNT1;
-  }
-  else
-  {
-    safetyInPulseLengthShared = (TCNT1 - safetyInPulseLengthStart)>>1;
-    bUpdateFlagsShared |= SAFETY_FLAG;
   }
 }
