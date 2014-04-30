@@ -113,14 +113,26 @@ volatile uint8_t bUpdateFlagsShared = 0;
 volatile uint16_t throttleInPulseLengthShared = 0;
 volatile uint16_t steeringInPulseLengthShared= 0;
 volatile uint16_t lightsInPulseLengthShared = 0;
+volatile unsigned long rcWatchdog = 0;
 uint16_t throttleInPulseLengthStart = 0;
 uint16_t steeringInPulseLengthStart = 0;
 uint16_t lightsInPulseLengthStart = 0;
 
+#define TURBO_OFF      0
+#define TURBO_ON       1
+#define TURBO_COOLDOWN 2
 
-uint8_t turbo_active = 0;
+//Max continuous runtime in turbo mode
+#define TURBO_ON_TIME        3000
+
+//Cooldown time after turbo 
+#define TURBO_COOLDOWN_TIME  3000
+
+uint8_t turboState = 0;
 uint32_t do_calibration = 0;
-uint8_t config_ok = 0;
+uint8_t localError = 0;
+int lighting_state = 0;
+unsigned long turboTimer = 0;
 
 void calcThrottle();
 void calcSteering();
@@ -129,6 +141,7 @@ void calcLighting();
 
 void setup()
 {
+  rcWatchdog = millis();
   Serial.begin(115200);
   Serial.println("RCBabyKart 1.0");
  Serial.println("a");
@@ -172,6 +185,7 @@ void setup()
   do_calibration = 0;
   if (TURBO_PUSHED)
   {
+    //save default configuration
     saveConfig();
     do_calibration = CALIBRATION_TIME;
   }
@@ -209,8 +223,6 @@ void printCalibration()
   Serial.println(""); 
 }
 
-int lighting_state = 0;
-int turbo_state = 0;
 
 void loop()
 {
@@ -221,14 +233,13 @@ void loop()
   static uint16_t throttleInPulseLength = 0;
   static uint16_t steeringInPulseLength = 0;
   static uint16_t lightsInPulseLength = 0;
-  static uint16_t safetyInPulseLength = 0;
   static uint8_t bUpdateFlags;
-
 
 
 // check shared update flags to see if any channels have a new signal
   if(bUpdateFlagsShared)
   {
+    rcWatchdog = millis();
     noInterrupts(); // turn interrupts off quickly while we take local copies of the shared variables
     bUpdateFlags = bUpdateFlagsShared;
 
@@ -249,6 +260,14 @@ void loop()
    
     bUpdateFlagsShared = 0;
     interrupts(); // we have local copies of the inputs, so now we can turn interrupts back on
+  }
+ 
+  //Pulse should come every 100ms if not there is a problem with the signal from the RC receiver
+  if ((millis() - rcWatchdog) > 100)
+  {
+    localError = 1;
+    analogWrite(STEERING_PWM_PIN, 0);
+    analogWrite(THROTTLE_PWM_PIN, 0);
   }
 
   if (do_calibration)
@@ -348,18 +367,46 @@ void loop()
   }
   else
   {
+    //RUNNING (Not Calibrating)
 
-    if (ESTOP)
+    if (ESTOP | localError)
     {
       analogWrite(STEERING_PWM_PIN, 0);
       analogWrite(THROTTLE_PWM_PIN, 0);
     }
     else
     {
+      if (turboState == TURBO_OFF)
+      { 
+        if (TURBO_PUSHED)
+        {
+          turboState = TURBO_ON;
+          turboTimer = millis();
+        }
+      }
+      else if (turboState == TURBO_ON)
+      {
+        if ((millis() - turboTimer) > TURBO_ON_TIME)
+        {
+            turboState = TURBO_COOLDOWN;
+        } 
+      }
+      else if (turboState == TURBO_COOLDOWN)
+      {
+        if ((millis() - turboTimer) > (TURBO_ON_TIME + TURBO_COOLDOWN_TIME))
+        {
+            turboState = TURBO_OFF;
+        } 
+      }
+      
       if (LOCAL_CONTROL)
       {
-        throttle_set = map(analogRead(GAS_PEDAL_PIN), 0,1023,-255,255);
+        throttle_set = map(analogRead(GAS_PEDAL_PIN), 0,1023,0,255);
         steering_set = analogRead(STEERING_WHEEL_PIN);
+        if (turboState == TURBO_ON)
+        {
+          throttle_set /= 2;
+        }
       }
       else
       {
@@ -376,10 +423,7 @@ void loop()
                        0,
                        1023);
 
-        if (!turbo_active)
-        {
-          throttle_set /= 2;
-        }
+
       }
       
       
@@ -390,6 +434,8 @@ void loop()
       }
       else
       {
+        //Max half speed reverse
+	throttle_set = throttle_set / 2;
         digitalWrite(THROTTLE_DIR_PIN, LOW);
       }
       analogWrite(THROTTLE_PWM_PIN, abs(throttle_set));
@@ -404,13 +450,6 @@ void loop()
 
       if (abs(steering_set - steering_feedback) > STEERING_DEADBAND)
       {
-        if(DEBUG)
-        {
-          //Serial.print("steering_set:"); 
-          //Serial.println(steering_set);
-          //Serial.print("steering_feedback:"); 
-          //Serial.println(steering_feedback);
-        }
         if (steering_set > steering_feedback)
         {
           digitalWrite(STEERING_DIR_PIN, HIGH);
@@ -445,6 +484,9 @@ void loop()
     if (DEBUG)
     {
       printCalibration();
+      Serial.print("STATUS: localError:");
+      Serial.print(localError, DEC);
+      Serial.println("");  
       Serial.print("OUTPUT: lighting_state:");
       Serial.print(lighting_state, DEC);
       Serial.println("");  
