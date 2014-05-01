@@ -84,7 +84,7 @@ void saveConfig() {
 #define STEERING_WHEEL_PIN    A2
 #define GAS_PEDAL_PIN         A3
 
-#define DEBUG 1
+#define DEBUG 0
 
 //deadband for steering, currently set to:
 // 20*(5V/1024) = ~100mV
@@ -399,7 +399,8 @@ void loop()
         } 
       }
       
-      if (LOCAL_CONTROL)
+      if (0)
+      //if (LOCAL_CONTROL)
       {
         throttle_set = map(analogRead(GAS_PEDAL_PIN), 0,1023,0,255);
         steering_set = analogRead(STEERING_WHEEL_PIN);
@@ -430,13 +431,13 @@ void loop()
       //SET THROTTLE
       if (throttle_set >= 0)
       {
-        digitalWrite(THROTTLE_DIR_PIN, HIGH);
+        digitalWrite(THROTTLE_DIR_PIN, LOW);
       }
       else
       {
         //Max half speed reverse
 	throttle_set = throttle_set / 2;
-        digitalWrite(THROTTLE_DIR_PIN, LOW);
+        digitalWrite(THROTTLE_DIR_PIN, HIGH);
       }
       analogWrite(THROTTLE_PWM_PIN, abs(throttle_set));
       
@@ -452,11 +453,11 @@ void loop()
       {
         if (steering_set > steering_feedback)
         {
-          digitalWrite(STEERING_DIR_PIN, HIGH);
+          digitalWrite(STEERING_DIR_PIN, LOW);
         }
         else
         {
-          digitalWrite(STEERING_DIR_PIN, LOW);
+          digitalWrite(STEERING_DIR_PIN, HIGH);
         }
         steering_delta = steering_set - steering_feedback;
         analogWrite(STEERING_PWM_PIN, map(abs(steering_delta), 0, 1023, 50,255));
@@ -526,11 +527,7 @@ void loop()
       Serial.println(analogRead(A2));
       Serial.print("A3 (0-1023):");
       Serial.println(analogRead(A3));
-      delay(5000);
-    }
-    else
-    {
-      delay(500);
+      delay(1000);
     }
     
     bUpdateFlags = 0;
