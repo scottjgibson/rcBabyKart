@@ -61,7 +61,7 @@ void saveConfig() {
 #define STEERING_PWM_PIN       3
 #define THROTTLE_DIR_PIN       4
 #define THROTTLE_PWM_PIN       5
-#define LIGHTING_PIN           10
+#define LIGHTING_PIN           13
 
 //INPUTS:
 //Input from RC Receiver
@@ -74,7 +74,7 @@ void saveConfig() {
 #define TURBO_IN_PIN           11
 #define LOCAL_CONTROL_PIN      12
 #define LIGHTING_IN_PIN        12
-#define ESTOP_IN_PIN           13
+#define ESTOP_IN_PIN           10
 
 //Feedback for steering Servo (steering column position)
 #define STEERING_FEEDBACK_PIN A0
@@ -84,11 +84,11 @@ void saveConfig() {
 #define STEERING_WHEEL_PIN    A2
 #define GAS_PEDAL_PIN         A3
 
-#define DEBUG 0
+#define DEBUG 1
 
 //deadband for steering, currently set to:
 // 20*(5V/1024) = ~100mV
-#define STEERING_DEADBAND 20
+#define STEERING_DEADBAND 25
 
 // Assign servo indexes
 #define SERVO_THROTTLE        0
@@ -164,7 +164,7 @@ void setup()
   digitalWrite(LIGHTING_PIN, LOW);
   pinMode(STEERING_DIR_PIN, OUTPUT);
   pinMode(STEERING_PWM_PIN, OUTPUT);
-  analogWrite(STEERING_PWM_PIN, 255);
+  analogWrite(STEERING_PWM_PIN, 0);
 
   //Emergeny Stop input
   //Pulled up internally; must be kept low by safety circuit
@@ -223,6 +223,7 @@ void printCalibration()
   Serial.println(""); 
 }
 
+int dc = 0;
 
 void loop()
 {
@@ -439,6 +440,12 @@ void loop()
 	throttle_set = throttle_set / 2;
         digitalWrite(THROTTLE_DIR_PIN, HIGH);
       }
+      
+      if (abs(throttle_set) < 30)
+      {
+        throttle_set = 0;
+      }
+      
       analogWrite(THROTTLE_PWM_PIN, abs(throttle_set));
       
 
@@ -460,7 +467,7 @@ void loop()
           digitalWrite(STEERING_DIR_PIN, HIGH);
         }
         steering_delta = steering_set - steering_feedback;
-        analogWrite(STEERING_PWM_PIN, map(abs(steering_delta), 0, 1023, 50,255));
+        analogWrite(STEERING_PWM_PIN, map(abs(steering_delta), 0, 1023, 50,128));
       }
       else
       {
@@ -482,8 +489,9 @@ void loop()
     }
 
     
-    if (DEBUG)
+    if (dc++ == 50)
     {
+      dc = 0;
       printCalibration();
       Serial.print("STATUS: localError:");
       Serial.print(localError, DEC);
@@ -527,9 +535,9 @@ void loop()
       Serial.println(analogRead(A2));
       Serial.print("A3 (0-1023):");
       Serial.println(analogRead(A3));
-      delay(1000);
+      
     }
-    
+    delay(10);
     bUpdateFlags = 0;
   }
 }
